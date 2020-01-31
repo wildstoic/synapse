@@ -38,7 +38,7 @@ from synapse.api.room_versions import (
     RoomVersion,
     RoomVersions,
 )
-from synapse.events import builder, room_version_to_event_format
+from synapse.events import EventBase, builder, room_version_to_event_format
 from synapse.federation.federation_base import FederationBase, event_from_pdu_json
 from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.utils import log_function
@@ -506,17 +506,20 @@ class FederationClient(FederationBase):
             "make_" + membership, destinations, send_request
         )
 
-    def send_join(self, destinations, pdu, event_format_version):
+    def send_join(
+        self, destinations: Iterable[str], pdu: EventBase, room_version: RoomVersion
+    ):
         """Sends a join event to one of a list of homeservers.
 
         Doing so will cause the remote server to add the event to the graph,
         and send the event out to the rest of the federation.
 
         Args:
-            destinations (str): Candidate homeservers which are probably
+            destinations: Candidate homeservers which are probably
                 participating in the room.
-            pdu (BaseEvent): event to be sent
-            event_format_version (int): The event format version
+            pdu: event to be sent
+            room_version: the version of the room (according to the server that
+                did the make_join)
 
         Return:
             Deferred: resolves to a dict with members ``origin`` (a string
@@ -538,13 +541,16 @@ class FederationClient(FederationBase):
                 raise InvalidResponseError("no %s in auth chain" % (EventTypes.Create,))
 
             # the room version should be sane.
-            room_version = create_event.content.get("room_version", "1")
-            if room_version not in KNOWN_ROOM_VERSIONS:
-                # This shouldn't be possible, because the remote server should have
-                # rejected the join attempt during make_join.
+            create_room_version = create_event.content.get("room_version", "1")
+            if create_room_version != room_version.identifier:
+                # either the server that fulfilled the make_join, or the server that is
+                # handling the send_join, is lying.
                 raise InvalidResponseError(
-                    "room appears to have unsupported version %s" % (room_version,)
+                    "Unexpected room version %s in create event"
+                    % (create_room_version,)
                 )
+
+        event_format_version = room_version.event_format
 
         @defer.inlineCallbacks
         def send_request(destination):
