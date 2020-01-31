@@ -17,7 +17,7 @@
 import copy
 import itertools
 import logging
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 from prometheus_client import Counter
 
@@ -35,6 +35,7 @@ from synapse.api.errors import (
 from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
     EventFormatVersions,
+    RoomVersion,
     RoomVersions,
 )
 from synapse.events import builder, room_version_to_event_format
@@ -218,7 +219,12 @@ class FederationClient(FederationBase):
     @defer.inlineCallbacks
     @log_function
     def get_pdu(
-        self, destinations, event_id, room_version, outlier=False, timeout=None
+        self,
+        destinations: Iterable[str],
+        event_id: str,
+        room_version: RoomVersion,
+        outlier: bool = False,
+        timeout: Optional[int] = None,
     ):
         """Requests the PDU with given origin and ID from the remote home
         servers.
@@ -227,18 +233,18 @@ class FederationClient(FederationBase):
         one succeeds.
 
         Args:
-            destinations (list): Which homeservers to query
-            event_id (str): event to fetch
-            room_version (str): version of the room
-            outlier (bool): Indicates whether the PDU is an `outlier`, i.e. if
+            destinations: Which homeservers to query
+            event_id: event to fetch
+            room_version: version of the room
+            outlier: Indicates whether the PDU is an `outlier`, i.e. if
                 it's from an arbitary point in the context as opposed to part
                 of the current block of PDUs. Defaults to `False`
-            timeout (int): How long to try (in ms) each destination for before
+            timeout: How long to try (in ms) each destination for before
                 moving to the next destination. None indicates no timeout.
 
         Returns:
-            Deferred: Results in the requested PDU, or None if we were unable to find
-               it.
+            Deferred[Optional[FrozenEvent]]: The requested PDU, or None if we were
+               unable to find it.
         """
 
         # TODO: Rate limit the number of times we try and get the same event.
@@ -249,7 +255,7 @@ class FederationClient(FederationBase):
 
         pdu_attempts = self.pdu_destination_tried.setdefault(event_id, {})
 
-        format_ver = room_version_to_event_format(room_version)
+        format_ver = room_version.event_format
 
         signed_pdu = None
         for destination in destinations:
@@ -279,7 +285,9 @@ class FederationClient(FederationBase):
                     pdu = pdu_list[0]
 
                     # Check signatures are correct.
-                    signed_pdu = yield self._check_sigs_and_hash(room_version, pdu)
+                    signed_pdu = yield self._check_sigs_and_hash(
+                        room_version.identifier, pdu
+                    )
 
                     break
 
